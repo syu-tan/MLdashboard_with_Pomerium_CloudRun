@@ -1,0 +1,57 @@
+name: Production Terraform Apply
+
+on:
+  pull_request:
+    types: closed
+    branches:
+     - 'main'
+    paths:
+      - "infra/tf/**"
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: GCP Authenticate
+        uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_SERVICE_KEY }}
+
+      - name: gcloud components install beta
+        run: gcloud components install beta
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 0.13.5
+
+      - name: Terraform Init
+        working-directory: ./infra/tf
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCLOUD_SERVICE_KEY}}
+        run: terraform init
+
+      - name: Terraform Format
+        working-directory: ./infra/tf
+        run: terraform fmt -recursive -check
+
+      - name: Terraform Validate
+        working-directory: ./infra/tf
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ./infra/tf
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCLOUD_SERVICE_KEY }}
+        run: terraform plan -var-file=sandbox.tfvars
+
+      - name: Terraform Apply
+        working-directory: ./infra/tf
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCLOUD_SERVICE_KEY }}
+        run: terraform apply -auto-approve -var-file=sandbox.tfvars

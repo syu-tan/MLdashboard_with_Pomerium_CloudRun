@@ -1,0 +1,39 @@
+name: Push to GCR GitHub Action
+on:
+  pull_request:
+    types: closed
+    branches:
+     - 'main'
+    paths:
+     - 'tensorboard-cloudrun/**'
+
+jobs:
+  tensorboard-build-and-push-to-gcr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+    
+     # Setup gcloud CLI
+      - name: GCP Authenticate
+        uses: google-github-actions/setup-gcloud@master
+        with:
+          service_account_key: ${{ secrets.GCLOUD_SERVICE_KEY }}
+          project_id: ${{ secrets.GCLOUD_PROJECT_ID }}
+
+      - name: Build & push a docker image for tensorboard
+        run: gcloud builds submit tensorboard-cloudrun --tag asia.gcr.io/${{ secrets.GCLOUD_PROJECT_ID }}/tensorboard-cloudrun
+
+
+    # terraform apply for a new container
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 0.13.5
+
+      - name: Terraform Apply
+        working-directory: ./infra/tf
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCLOUD_SERVICE_KEY }}
+        run: terraform apply -auto-approve -var-file=sandbox.tfvars

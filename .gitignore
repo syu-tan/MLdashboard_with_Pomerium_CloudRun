@@ -1,0 +1,12 @@
+.DS_Store
+
+# Ignore IntelliJ IDEA-specific files
+/.idea
+
+# Ignore Terraform metadata files
+infra/tf/.terraform
+infra/tf/terraform.tfstate
+infra/tf/terraform.tfstate.backup
+infra/tf/tfplan
+infra/common/secret/.terraform
+infra/common/iam/.terraform
