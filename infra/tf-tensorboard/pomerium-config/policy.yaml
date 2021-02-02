@@ -1,0 +1,10 @@
+- from: ${POMERIUM_URL}
+  to: ${DASHBOARD_URL}
+  allowed_domains:
+      - example.com
+  enable_google_cloud_serverless_authentication: true
+- from: ${POMERIUM_URL}
+  to: https://httpbin.org
+  pass_identity_headers: true
+  allowed_domains:
+    - example.com
