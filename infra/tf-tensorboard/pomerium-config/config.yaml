@@ -1,0 +1,6 @@
+authenticate_service_url: ${URL}
+shared_secret: ${SHARED_SECRET}
+cookie_secret: ${COOKIE_SECRET}
+idp_provider: 'google'
+idp_client_id: ${IDP_CLIENT_ID}
+idp_client_secret: ${IDP_CLIENT_SECRET}
