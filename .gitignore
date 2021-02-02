@@ -14,3 +14,7 @@ infra/tf-mlflow/.terraform
 infra/tf-mlflow/terraform.tfstate
 infra/tf-mlflow/terraform.tfstate.backup
 infra/tf-mlflow/tfplan
+infra/tf-tensorboard/.terraform
+infra/tf-tensorboard/terraform.tfstate
+infra/tf-tensorboard/terraform.tfstate.backup
+infra/tf-tensorboard/tfplan
