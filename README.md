@@ -3,120 +3,245 @@
 
 ## 使い方
 
-１． 自分のgithubレポジトリにまるっとコピーする。
-２． 認証付きダッシュボードの設定を更新する。
-３． github actionsのワークフローを起動するために、github secretsのアップデート
-４． terraformの変数をアップデートしてpull requestしてmergeする。
-５． GCP上で立ち上がる。
+1. GCPのプロジェクトにterraform状態を保存するバケットを作る。
+1. 認証情報の設定をGCPのプロジェクトで作る。
+1. terraformの変数の設定を更新する。
+1. `terraform init` →　`terraform apply`　（後述）
+1. github actionsのワークフローを起動するために、github secretsのアップデート
+
+github actionsの稼働が要らないのであれば、1.と5.は不要です。
+
+## 必要な環境
+- gcloud CLIコマンド
+- terraform
+
+Optional Aを参照
+
+## 0. GCPの設定
+
+### 0-1. 認証情報の設定
+
+ナビゲーションメニューから　`APIとサービス`→`認証情報`を選択
+
+<img align="center" src="assets/001.png">
+
+`+認証情報を作成`→`OAuthクライアントID`をクリックする。
+
+<img align="center" src="assets/002.png">
+
+
+`アプリケーションの種類`のプルダウンから、`ウェブアプリケーション`を選択して名前を適当につけて、作成します。
+
+<img align="center" src="assets/003.png">
+
+
+ここで得られる`クライアントID`と`クライアントシークレット`をterraform実行時に使います。
+
+<img align="center" src="assets/004.png">
+
+
+### 0-2. terraform stateを保存するバケットの作成（Optional)
+
+```bash
+export PROJECT_ID=$(gcloud info --format='value(config.project)')
+gcloud config set project $PROJECT_ID
+expoert TF_BUCKET=${PROJECT_ID}-tfstate-hoge
+gcloud mb gs://${TF_BUCKET}
+```
+
+`TF_BUCKET`は`infra/tf-tensorboard`または`infra/tf-mlflow`以下の`provider.tf`の
+```terraform
+
+  backend "gcs" {
+    bucket = ${TF_BUCKET}
+  }
+```
+を書き換えてください。立ち上げるサービスごとに別々のBUCKETが必要でので、適宜`hoge`を書き換えて使ってください。
 
 ## 1. 認証付きダッシュボード
 
+認証したいドメインやメールアドレスの設定は、`infra/tf-tensorboard/pomerium-config`または、`infra/tf-mlflow/pomerium-config/`以下の、`policy.yaml`の設定を[こちら](https://www.pomerium.io/reference/#allowed-idp-claims)を参考に変更してください。
+
+現在`example.com`のドメインのみ許可するように設定しています。
+
 ### 1-1. tensorboard
 ```
+git clone （このレポジトリ）
+export PROJECT_ID=$(gcloud info --format='value(config.project)')
 cd tensorboard-cloudrun
-gcloud builds submit --tag asia.gcr.io/(YOUR_PROJECT)/tensorboard-cloudrun --project (YOUR_PROJECT)
+gcloud builds submit --tag asia.gcr.io/${PROJECT_ID}/tensorboard-cloudrun --project ${PROJECT_ID}
 ```
-でgcrコンテナに登録しておきます。(asiaは、データセンターの位置が物理的に近いのでアップロードなどが速いらしい。)
+でgcrコンテナに登録します。(asiaは、データセンターの位置が物理的に近いのでアップロードなどが速いらしい。)
 
-認証用コンテナの設定には、まだ立ち上がってない認証用コンテナのURLやtensorboardのURLが必要になります。
-なので、一度Cloud Runでアプリを立ち上げてみます。
-```
-gcloud run deploy tensorboard-cloudrun \
-    --image=asia.gcr.io/(YOUR_PROJECT)/tensorboard-cloudrun \
-    --region asia-northeast1 \
-    --memory 512Mi \
-    --cpu 1000m \
-    --platform managed \
-    --update-env-vars EVENT_FILE_PATH=gs://(YOUR)/(PATH)/(TO)/(TENSORBOARD),RELOAD_INTERVAL=600
-```
-デプロイしたものはアクセスが自由にできるのであとで必ず消しましょう。
-このときに以下のコマンドを入力することで、ダッシュボードのURLがわかります。
-```
-gcloud run services describe tensorboard-cloudrun \
-    --platform managed \
-    --region asia-northeast1 \
-    --format 'value(status.address.url)'
-```
-
-`https://tensorboard-cloudrun-(YOUR_URL)`
-ここでの（YOUR_URL)は、リージョンとアカウントによって違うようです（あいまい）。
-認証用のコンテナのURL、は上記のURLの`tensorboard-cloudrun`の部分だけが異なるので、控えておきます。（この部分は運用上あまり良くないので変えたい）
-
-<b>この確認が終わったらサービスを消去しておきます。</b>
-terraformでデプロイをするときにエラーになるので必ず消しておきましょう。
-
-```
-gcloud run services delete tensorboard-cloudrun \
-    --platform managed \
-    --region asia-northeast1
-```
-消えてるのか確認します。
-```
-gcloud run services list
-```
-これで`tensorboard-cloudrun`が出力されなければ無事に消えています。
-
-### 1-2. 認証用コンテナ設定
-[pomerium](https://github.com/pomerium/pomerium)をcloud run上にデプロイして認証を行っています。
-GCP側のOauth認証の設定などは[GCPのOauth認証作成手順](https://cloud.google.com/run/docs/authenticating/end-users?hl=ja#google-sign-in)や[pomeriumのデプロイ手順](https://www.pomerium.com/guides/cloud-run.html#deploy)を参考にしてください。
-
-GCPに登録するOatuth2.0のクライアントID（APIとサービス／認証情報／Oauth2.0 クライアントID）の承認済リダイレクトURIに先ほど立ち上げたtensorboardのURLをつかって、
-```
-https://pomerium-cloudrun-(YOUR_URL)/callback
-https://pomerium-cloudrun-(YOUR_URL)/oauth2/callback
-```
-を追加しておいてください。
-
-pomeriumのデプロイ手順通りに薦めると、GCP secretsに設定の登録が必要ですが、`config.yaml`については、
-
-```
-authenticate_service_url: https://pomerium-cloudrun-(YOUR_URL)/
-```
-と記載して、あとは上記のサイトの通りにGCP secretsに設定の登録をします。
-
-pomeriumのリダイレクトするURLを記載しておく`policy.yaml`も
-```
-# policy.template.yaml
-# see https://www.pomerium.com/reference/#policy
-- from: https://pomerium-cloudrun-(YOUR_URL)
-  to: https://tensorboard-cloudrun-(YOUR_URL)
-  allowed_domains:
-    - example.com
-  enable_google_cloud_serverless_authentication: true
-- from: https://pomerium-cloudrun-(YOUR_URL)
-  to: https://httpbin.org
-  pass_identity_headers: true
-  allowed_domains:
-    - example.com
-```
-としておきます。
-<b> `policy.yaml`でのメールアドレスやドメインを指定することで、認証のスコープを変えることができます。</b>
-
-ここまでできれば、`infra/tf/sandbox.tfvars`を書き換えてください
-
+`infra/tf-tensorboard/sandbox.tfvars`の`(YOUR_PROJECT)`と、`(YOUR)/(TENSORBOARD)/(FILEPATH)`の項目を書き換えてください
 ```
 #provider
-project = "(YOUR_PROJECT)"
+project = "(YOUR_PROJECT)" ##ここと
 region  = "asia-northeast1"
 zone    = "asia-northeast1-a"
-env     = "sandbox"
 
 # cloud run 
 dashboard_name         = "tensorboard-cloudrun"
 dashboard_cpu          = "1000"
 dashboard_memory       = "512"
-event_filepath         = "gs://(YOUR)/(PATH)/(TO)/(TENSORBOARD)"
+event_filepath         = "gs://(YOUR)/(TENSORBOARD)/(FILEPATH)"　#ここ
 tensorboard_reroadtime = "600"
 autoscaling_max_num    = "2"
 
 # auth cloud run 
-auth_name      = "pomerium-cloudrun"
-auth_cpu       = "1000"
-auth_memory    = "512"
-encoded_policy = "(YOUR_POMERIUM_POLISY_ENCODE_BY_BASE64)"
+auth_name              = "pomerium-cloudrun"
+auth_cpu               = "1000"
+auth_memory            = "512"
+secret_pomerium_config = "pomerium-config"
+```
+github actionsを使ったCI/CDを行わない場合には、
+`infra/tf-tensorboard/provider.tf`の
+
+```terraform
+
+  backend "gcs" {
+    bucket = ${TF_BUCKET}
+  }
+```
+を削除しておいてください。
+
+設定が終われば、
+```
+cd infra/tf-tensorboard
+terraform init
+terraform apply -var-file=sandbox.tfvars \
+                -var="idp_client_id=(0-1で取得したクライアントID)" \
+                -ver="idp_client_secret=(0-1で取得したクライアントシークレット)"
+```
+で、サービスがすべて立ち上がるので、OAuth2.0の`承認済みのリダイレクト URI`に認証サーバーのURIを以下のように登録してください。
+
 
 ```
-`(YOUR_POMERIUM_POLISY_ENCODE_BY_BASE64)`については先程書いた`policy.yaml`をbase64でエンコードして貼り付けてください。
+https://（認証サーバーのURL）/callback
+https://（認証サーバーのURL）/oauth2/callback
+```
+
+<img align="center" src="assets/005.png">
+
+#### 使い方
+
+teonsorboardに読み込ませるファイルを任意のGCSのバケットに配置してください。
+
+その場所を`terraform`の`gs://(YOUR)/(TENSORBOARD)/(FILEPATH)`と書き換えてください。
+
+CloudRunにアクセスすればtensorboardが見れます。
+
+### 1-2. mlflow
+
+```
+git clone （このレポジトリ）
+export PROJECT_ID=$(gcloud info --format='value(config.project)')
+cd mlflow-cloudrun
+gcloud builds submit --tag asia.gcr.io/${PROJECT_ID}/mlflow-cloudrun --project ${PROJECT_ID}
+```
+
+`infra/tf-mlflow/sandbox.tfvars`の`(YOUR_PROJECT)`を自分のプロジェクトに書き換えてください。
+```
+#provider
+project = "(YOUR_PROJECT)" #ここ
+region  = "asia-northeast1"
+zone    = "asia-northeast1-a"
+env     = "sandbox"
+
+# cloud run 
+dashboard_name             = "mlflow-cloudrun"
+dashboard_cpu              = "2000"
+dashboard_memory           = "1024"
+autoscaling_max_num        = "4"
+mlflow_artifact_store_name = "mlflow-artifact"
+
+# auth cloud run 
+auth_name      = "pomerium-mlflow"
+auth_cpu       = "1000"
+auth_memory    = "512"
+encoded_policy = "data"
+
+# db
+db_name = "mlflow"
+```
+github actionsを使ったCI/CDを行わない場合には、
+`infra/tf-mlflow/provider.tf`の
+
+```terraform
+
+  backend "gcs" {
+    bucket = ${TF_BUCKET}
+  }
+```
+を削除しておいてください。
+
+設定が終われば、
+```
+cd infra/tf-mlflow
+terraform init
+terraform apply -var-file=sandbox.tfvars \
+                -var="idp_client_id=(0-1で取得したクライアントID)" \
+                -ver="idp_client_secret=(0-1で取得したクライアントシークレット)"
+```
+で、サービスがすべて立ち上がるので、OAuth2.0の`承認済みのリダイレクト URI`に認証サーバーのURIを以下のように登録してください。
+
+
+```
+https://（認証サーバーのURL）/callback
+https://（認証サーバーのURL）/oauth2/callback
+```
+
+<img align="center" src="assets/005.png">
+
+#### 使い方
+
+GCPのナビゲーションメニューから　`IAMと管理`→`サービスアカウント`を選択すると、`mlflow-cloudrun-invvoker@...`というアカウントが作成されています。
+
+<img align="center" src="assets/006.png">
+
+上記赤枠から`鍵を作成`→`JSON`を選択すると、ローカルPCに鍵が保存されます。MLflowで学習を保存させる場合にはこの鍵を利用します。
+
+動かすためには以下のライブラリがローカルマシンに必要です。
+
+```
+pip install --upgrade google-auth
+pip install mlflow
+```
+
+使い方の例
+
+```python
+import os
+
+from google.auth.transport.requests import AuthorizedSession
+from google.oauth2 import service_account
+import mlflow
+
+mlflow_url = '(CLOUD_RUN_MLFLOW_URL)'
+PATH_TO_CREDENTIAL = '(DOWNLOADED_CREDENTIAL_PATH)'
+
+
+def set_mlflow_env(mlflow_url):
+    creds = service_account.IDTokenCredentials.from_service_account_file(
+        PATH_TO_CREDENTIAL,
+        target_audience=mlflow_url)
+
+    authed_session = AuthorizedSession(creds)
+    authed_session.get(mlflow_url)
+    token = creds.token
+    os.environ["MLFLOW_TRACKING_TOKEN"] = token
+
+if __name__ == '__main__':
+    set_mlflow_env(mlflow_url)
+    # DO SOMETHING
+
+    mlflow.set_tracking_uri(mlflow_url)
+    mlflow.start_run()
+    mlflow.log_param('hoge', hoge)
+    mlflow.log_metric('score', your_score)
+    mlflow.sklearn.log-model(your_model, "ml_models")
+    mlflow.end_run()
+```
 
 
 ## 2． github actionsの設定
@@ -127,8 +252,9 @@ github secretの以下のパラメータをアップデートしてください�
 | パラメータ| 説明 |
 | ------------- | ------------- |
 | GCLOUD_PROJECT_ID | GCPのプロジェクト名  |
-| GCLOUD_SERVICE_KEY | base64でエンコードしたprojectのservice account key のcredential |
-
+| GCLOUD_SERVICE_KEY | projectのservice account key のcredential |
+| IDP_CLIENT_ID | 0-1で取得したクライアントID |
+| IDP_CLIENT_SECRET | 0-1で取得したクライアントシークレット |
 
 詳しくは[公式](https://github.com/google-github-actions/setup-gcloud)を参考にしてください。
 
@@ -236,17 +362,3 @@ $ brew install tflint
 ```shell
 C:\> terraform --version
 ```
-
-
-
-
-### Done
-- [x] CloudRunによる認証付きダッシュボード(tensorboard)の作成 
-- [x] 認証機構とダッシュボードのterraform化
-- [x] 認証機構とダッシュボードのCI/CD化
-
-### ToDo
-上の方から順番に行う。
-- [ ] MLFlowへの対応。
-- [ ] URLやpomeriumの秘匿情報をgithub　Actionsでまとめる。
-- [ ] 認証機構のpolicyをbase64でエンコードしているが、ここもterraformで自動化する。

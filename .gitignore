@@ -10,3 +10,7 @@ infra/tf/terraform.tfstate.backup
 infra/tf/tfplan
 infra/common/secret/.terraform
 infra/common/iam/.terraform
+infra/tf-mlflow/.terraform
+infra/tf-mlflow/terraform.tfstate
+infra/tf-mlflow/terraform.tfstate.backup
+infra/tf-mlflow/tfplan
